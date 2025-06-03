@@ -2,6 +2,8 @@ const express = require('express');
 const NumberFightGame = require('./gameLogic');
 const { MongoClient } = require('mongodb');
 const bcrypt = require('bcryptjs');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -94,8 +96,20 @@ app.post('/register', async (req, res) => {
         }
         // Parolayı hashle
         const hashedPassword = await bcrypt.hash(password, 10);
-        await users.insertOne({ name, email, password: hashedPassword, birthDate });
-        res.json({ message: 'Kayıt başarılı' });
+        const result = await users.insertOne({ name, email, password: hashedPassword, birthDate });
+
+        // Token oluştur (örnek, gerçek uygulamada JWT önerilir)
+        const token = Math.random().toString(36).substring(2); // Basit örnek token
+
+        const user = {
+            _id: result.insertedId,
+            name,
+            email,
+            birthDate,
+            token
+        };
+
+        res.json({ user });
     } catch (e) {
         console.error('Kayıt sırasında hata:', e);
         res.status(500).json({ error: 'Kayıt sırasında hata oluştu.' });
@@ -122,8 +136,12 @@ app.post('/login', async (req, res) => {
         if (!match) {
             return res.status(401).json({ error: 'Parola hatalı' });
         }
+        // Token oluştur (örnek, gerçek uygulamada JWT önerilir)
+        const token = Math.random().toString(36).substring(2); // Basit örnek token
+        await users.updateOne({ email }, { $set: { token } });
         // Güvenlik için parola bilgisini döndürme
         const { password: _, ...userData } = user;
+        userData.token = token;
         res.json({ message: 'Giriş başarılı', user: userData });
     } catch (e) {
         res.status(500).json({ error: 'Giriş sırasında hata oluştu.' });
@@ -175,6 +193,67 @@ app.get('/', (req, res) => {
     res.send('Merhaba, Express sunucusu çalışıyor!');
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Sunucu çalışıyor: http://localhost:${PORT}`);
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: { origin: '*' }
+});
+
+// Oda ve eşleşme yönetimi
+let waitingPlayer = null;
+const rooms = {};
+
+io.on('connection', (socket) => {
+    // Oda bulma
+    socket.on('find_room', () => {
+        if (waitingPlayer && waitingPlayer.id !== socket.id) {
+            // Eşleşme bulundu
+            const roomId = `room_${waitingPlayer.id}_${socket.id}`;
+            rooms[roomId] = {
+                players: [waitingPlayer, socket],
+                cards: [[1, 2, 3, 4, 5, 6, 7], [1, 2, 3, 4, 5, 6, 7]],
+                scores: [0, 0],
+                turn: 0
+            };
+            waitingPlayer.join(roomId);
+            socket.join(roomId);
+            waitingPlayer.emit('room_joined', { roomId, playerIndex: 0 });
+            socket.emit('room_joined', { roomId, playerIndex: 1 });
+            io.to(roomId).emit('start_game');
+            waitingPlayer = null;
+        } else {
+            waitingPlayer = socket;
+        }
+    });
+
+    // Kart oynama
+    socket.on('play_card', ({ roomId, card, playerIndex }) => {
+        const room = rooms[roomId];
+        if (!room) return;
+        if (playerIndex === -1) return;
+        // Kartı elden çıkar
+        room.cards[playerIndex] = room.cards[playerIndex].filter(c => c !== card);
+        room.turn = 1 - playerIndex;
+        // Herkese bildir (hem rakibe hem kendine)
+        io.to(roomId).emit('opponent_played', { card, playerIndex });
+        // Skor güncellemesi (örnek, gerçek mantık eklenebilir)
+        io.to(roomId).emit('update_scores', room.scores);
+    });
+
+    socket.on('disconnect', () => {
+        if (waitingPlayer && waitingPlayer.id === socket.id) {
+            waitingPlayer = null;
+        }
+        // Oda temizliği
+        Object.keys(rooms).forEach(roomId => {
+            const room = rooms[roomId];
+            if (room.players.some(s => s.id === socket.id)) {
+                delete rooms[roomId];
+                io.to(roomId).emit('opponent_left');
+            }
+        });
+    });
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Sunucu (socket.io ile) çalışıyor: http://localhost:${PORT}`);
 }); 

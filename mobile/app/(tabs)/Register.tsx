@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 import { View, TextInput, Button, Alert, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import DateTimePicker, { DateType, useDefaultStyles } from 'react-native-ui-datepicker';
 
@@ -13,6 +15,17 @@ export default function RegisterScreen({ navigation }: any) {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [loading, setLoading] = useState(false);
     const defaultStyles = useDefaultStyles();
+    const router = useRouter();
+
+    useEffect(() => {
+        const checkAuth = async () => {
+            const user = await AsyncStorage.getItem('user');
+            if (user) {
+                router.replace('/(tabs)');
+            }
+        };
+        checkAuth();
+    }, []);
 
     // Parola gereksinimi kontrolü
     const isPasswordValid = (pw: string) => {
@@ -56,9 +69,14 @@ export default function RegisterScreen({ navigation }: any) {
             if (!res.ok) {
                 Alert.alert('Hata', data.error || 'Kayıt başarısız.');
             } else {
-                Alert.alert('Başarılı', 'Kayıt başarılı! Giriş yapabilirsiniz.', [
-                    { text: 'Tamam', onPress: () => navigation.goBack() },
-                ]);
+                if (data.user && data.user.token) {
+                    await AsyncStorage.setItem('user', JSON.stringify(data.user));
+                    Alert.alert('Başarılı', 'Kayıt başarılı! Giriş yapabilirsiniz.', [
+                        { text: 'Tamam', onPress: () => router.back() },
+                    ]);
+                } else {
+                    Alert.alert('Hata', 'Sunucudan geçerli bir oturum anahtarı alınamadı. Lütfen tekrar deneyin.');
+                }
             }
         } catch (e) {
             Alert.alert('Hata', 'Sunucuya bağlanılamadı.');

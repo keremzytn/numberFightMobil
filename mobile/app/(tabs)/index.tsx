@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Image } from 'expo-image';
-import { Platform, StyleSheet, TextInput, Button, View, TouchableOpacity, Alert } from 'react-native';
+import { Animated, Platform, StyleSheet, TextInput, Button, View, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -33,6 +33,15 @@ const COLORS = {
   muted: '#8e99a3',
 };
 
+function canPlayCard(card: number, hand: number[], used: number[], lastCard: number | null, skipRule: boolean) {
+  if (used.includes(card)) return false;
+  if (skipRule) return true;
+  if (lastCard !== null) {
+    if (card === lastCard - 1 || card === lastCard + 1) return false;
+  }
+  return true;
+}
+
 export default function HomeScreen() {
   const [name, setName] = useState('');
   const [started, setStarted] = useState(false);
@@ -46,6 +55,9 @@ export default function HomeScreen() {
   const [selectedMode, setSelectedMode] = useState<string | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
+  const [usedCards, setUsedCards] = useState<number[]>([]);
+  const [lastCard, setLastCard] = useState<number | null>(null);
+  const [skipRule, setSkipRule] = useState<boolean>(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -74,6 +86,9 @@ export default function HomeScreen() {
       setPlayerScore(0);
       setOpponentScore(0);
       setAiLastMove(null);
+      setUsedCards([]);
+      setLastCard(null);
+      setSkipRule(false);
       setStarted(true);
     } catch (e) {
       Alert.alert('Hata', 'APIye bağlanılamadı.');
@@ -85,6 +100,7 @@ export default function HomeScreen() {
     if (loading) return;
     setLoading(true);
     setSelectedCard(card);
+    await new Promise(resolve => setTimeout(resolve, 500)); // 2 saniye bekle
     try {
       const res = await fetch(`${API_URL}/game/play`, {
         method: 'POST',
@@ -97,7 +113,6 @@ export default function HomeScreen() {
         setLoading(false);
         return;
       }
-      // Kartı elden çıkar
       setPlayerCards(prev => prev.filter(c => c !== card));
       setAiLastMove(data.aiMove ?? null);
       // Skor güncellemesi (sadece demo, gerçek skor backend'de hesaplanmalı)
@@ -108,6 +123,16 @@ export default function HomeScreen() {
           const p1 = last[1].card;
           if (p0 > p1) setPlayerScore(s => s + 1);
           else if (p1 > p0) setOpponentScore(s => s + 1);
+        }
+        // Kullanılan kartlar ve son kartı güncelle
+        const myMoves = data.history.filter((h: any) => h.player === 0);
+        setUsedCards(myMoves.map((h: any) => h.card));
+        setLastCard(myMoves.length > 0 ? myMoves[myMoves.length - 1].card : null);
+        // 5. round ve ortadaki kart kuralı için skipRule'u güncelle
+        if (data.round === 6) setSkipRule(false);
+        else if (data.round === 5 && playerCards.length === 3) {
+          const sorted = [...playerCards].sort((a, b) => a - b);
+          if (card === sorted[1]) setSkipRule(true);
         }
       }
     } catch (e) {
@@ -153,6 +178,12 @@ export default function HomeScreen() {
       )}
     </View>
   );
+
+  // Oynanabilir kartları hesapla
+  const playableCards = playerCards.filter(card => canPlayCard(card, playerCards, usedCards, lastCard, skipRule));
+
+  // Oyun bitti mi?
+  const isGameOver = playerCards.length === 0;
 
   if (showRegister) {
     return <RegisterScreen navigation={{ goBack: () => setShowRegister(false) }} />;
@@ -212,6 +243,22 @@ export default function HomeScreen() {
     );
   }
 
+  if (isGameOver) {
+    let result = '';
+    if (playerScore > opponentScore) result = 'Kazandın!';
+    else if (playerScore < opponentScore) result = 'Kaybettin!';
+    else result = 'Berabere!';
+    return (
+      <View style={styles.centeredContainer}>
+        <ThemedText type="title" style={{ fontSize: 32, marginBottom: 24 }}>Oyun Bitti</ThemedText>
+        <ThemedText type="subtitle" style={{ fontSize: 24, marginBottom: 12 }}>{result}</ThemedText>
+        <ThemedText style={{ fontSize: 20, marginBottom: 24 }}>Skor: {playerScore} - {opponentScore}</ThemedText>
+        <Button title="Tekrar Oyna" onPress={startGame} />
+        <Button title="Ana Menü" onPress={handleBack} color="#888" />
+      </View>
+    );
+  }
+
   return (
     <>
       <TopBarMenu />
@@ -226,6 +273,7 @@ export default function HomeScreen() {
         loading={loading}
         aiLastMove={aiLastMove}
         styles={styles}
+        playableCards={playableCards}
       />
     </>
   );
@@ -319,34 +367,38 @@ const styles = StyleSheet.create({
     marginTop: 32,
   },
   card: {
-    width: 60,
-    height: 86,
-    backgroundColor: COLORS.card,
-    borderRadius: 16,
+    width: 68,
+    height: 110,
+    backgroundColor: '#fff',
+    borderRadius: 20,
     borderWidth: 2,
-    borderColor: COLORS.border,
+    borderColor: '#b0bec5',
     alignItems: 'center',
     justifyContent: 'center',
     margin: 8,
-    elevation: 5,
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.13,
-    shadowRadius: 8,
-    transitionProperty: 'all',
-    transitionDuration: '200ms',
+    elevation: 6,
+    shadowColor: '#b0bec5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.10,
+    shadowRadius: 6,
   },
   selectedCard: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.accent,
-    transform: [{ scale: 1.12 }],
-    shadowOpacity: 0.22,
+    borderColor: '#0a7ea4',
+    backgroundColor: '#00e0b0',
+    borderWidth: 4,
+    transform: [{ scale: 1.13 }],
+    shadowOpacity: 0.30,
+    shadowColor: '#0a7ea4',
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
   },
   cardText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: COLORS.text,
+    fontSize: 25,
+    fontWeight: '900',
+    color: '#111',
     letterSpacing: 1,
+    textAlign: 'center',
   },
   topBar: {
     width: '100%',

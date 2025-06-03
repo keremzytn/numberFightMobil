@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, TextInput, Button, Alert, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import DateTimePicker, { useDefaultStyles } from 'react-native-ui-datepicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 
 const API_URL = 'http://192.168.1.102:3000';
 
@@ -14,19 +16,33 @@ export default function ProfileScreen() {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [loading, setLoading] = useState(false);
     const defaultStyles = useDefaultStyles();
-
-    // Sadece test için, gerçek uygulamada email oturumdan alınmalı
-    const TEST_EMAIL = 'test@example.com';
+    const router = useRouter();
 
     useEffect(() => {
+        const checkAuth = async () => {
+            const user = await AsyncStorage.getItem('user');
+            if (!user) {
+                router.replace('/(tabs)/Login');
+                return;
+            }
+        };
+        checkAuth();
         // Profil bilgilerini çek
         const fetchProfile = async () => {
             setLoading(true);
             try {
+                const userStr = await AsyncStorage.getItem('user');
+                const user = userStr ? JSON.parse(userStr) : null;
+                const userEmail = user?.email;
+                if (!userEmail) {
+                    Alert.alert('Hata', 'Kullanıcı oturumu bulunamadı.');
+                    setLoading(false);
+                    return;
+                }
                 const res = await fetch(`${API_URL}/profile/me`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: TEST_EMAIL }),
+                    body: JSON.stringify({ email: userEmail }),
                 });
                 const data = await res.json();
                 if (res.ok && data.user) {
@@ -34,7 +50,9 @@ export default function ProfileScreen() {
                     setEmail(data.user.email || '');
                     setBirthDate(data.user.birthDate ? new Date(data.user.birthDate) : null);
                 }
-            } catch { }
+            } catch {
+                Alert.alert('Hata', 'Profil bilgileri alınamadı.');
+            }
             setLoading(false);
         };
         fetchProfile();
@@ -73,11 +91,18 @@ export default function ProfileScreen() {
         }
         setLoading(true);
         try {
-            // Profil güncelleme API'si örnek, backend'de /profile/update gibi bir endpoint olmalı
+            const userStr = await AsyncStorage.getItem('user');
+            const user = userStr ? JSON.parse(userStr) : null;
+            const userEmail = user?.email;
+            if (!userEmail) {
+                Alert.alert('Hata', 'Kullanıcı oturumu bulunamadı.');
+                setLoading(false);
+                return;
+            }
             const res = await fetch(`${API_URL}/profile/update`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email, password, birthDate }),
+                body: JSON.stringify({ name, email: userEmail, password, birthDate }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -89,6 +114,13 @@ export default function ProfileScreen() {
             Alert.alert('Hata', 'Sunucuya bağlanılamadı.');
         }
         setLoading(false);
+    };
+
+    const handleLogout = async () => {
+        await AsyncStorage.removeItem('user');
+        Alert.alert('Çıkış Yapıldı', 'Başarıyla çıkış yapıldı.', [
+            { text: 'Tamam', onPress: () => router.replace('/(tabs)/Login') },
+        ]);
     };
 
     return (
@@ -143,6 +175,9 @@ export default function ProfileScreen() {
                 secureTextEntry
             />
             <Button title={loading ? 'Kaydediliyor...' : 'Güncelle'} onPress={handleUpdate} disabled={loading} />
+            <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+                <Text style={styles.logoutText}>Çıkış Yap</Text>
+            </TouchableOpacity>
         </View>
     );
 }
@@ -167,5 +202,17 @@ const styles = StyleSheet.create({
         marginBottom: 16,
         borderWidth: 1,
         borderColor: '#e0e0e0',
+    },
+    logoutButton: {
+        marginTop: 24,
+        backgroundColor: '#e53935',
+        padding: 14,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    logoutText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 18,
     },
 }); 

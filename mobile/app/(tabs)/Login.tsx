@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, TextInput, Button, Alert, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,6 +10,16 @@ export default function LoginScreen() {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const router = useRouter();
+
+    useEffect(() => {
+        const checkAuth = async () => {
+            const user = await AsyncStorage.getItem('user');
+            if (user) {
+                router.replace('/(tabs)');
+            }
+        };
+        checkAuth();
+    }, []);
 
     const isEmailValid = (mail: string) => /^\S+@\S+\.\S+$/.test(mail);
 
@@ -39,10 +49,14 @@ export default function LoginScreen() {
                     Alert.alert('Hata', data.error || 'Giriş başarısız.');
                 }
             } else {
-                await AsyncStorage.setItem('user', JSON.stringify(data.user || { email }));
-                Alert.alert('Başarılı', 'Giriş başarılı!', [
-                    { text: 'Tamam', onPress: () => router.replace('/') },
-                ]);
+                if (data.user && data.user.token) {
+                    await AsyncStorage.setItem('user', JSON.stringify(data.user));
+                    Alert.alert('Başarılı', 'Giriş başarılı!', [
+                        { text: 'Tamam', onPress: () => router.replace('/(tabs)') },
+                    ]);
+                } else {
+                    Alert.alert('Hata', 'Sunucudan geçerli bir oturum anahtarı alınamadı. Lütfen tekrar deneyin.');
+                }
             }
         } catch (e) {
             Alert.alert('Hata', 'Sunucuya bağlanılamadı.');
